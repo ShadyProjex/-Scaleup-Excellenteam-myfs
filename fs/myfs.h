@@ -55,6 +55,14 @@ public:
 	 */
 	void list_dir(std::string path_str);
 
+    /**
+	 * remove_file method
+	 * Removes a file from the filesystem.
+	 * This function deletes the file entry from the file table and marks its blocks as free in the free block bitmap.
+	 * @param path_str the file path (e.g. "/somefile")
+	 */
+    void remove_file(std::string path_str);
+
 private:
 
 	/**
@@ -70,10 +78,26 @@ private:
 		uint8_t version;
 	};
 
+    struct FileEntry {
+        char name[32];
+        uint32_t start_block;
+        uint32_t size;
+        bool is_directory;
+    };
+
+    struct SuperBlock {
+        myfs_header header;
+        uint32_t file_table_size;
+        uint32_t free_block_bitmap_size;
+    };
+
 	BlockDeviceSimulator *blkdevsim;
 
 	static const uint8_t CURR_VERSION = 0x03;
 	static const char *MYFS_MAGIC;
+    static const int BLOCK_SIZE = 4096;
+    static const int MAX_FILES = 128;
+    static const int MAX_BLOCKS = BlockDeviceSimulator::DEVICE_SIZE / BLOCK_SIZE;
 };
 
 #endif // __MYFS_H__

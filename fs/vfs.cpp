@@ -70,8 +70,11 @@ void run_vfs(MyFs &fs) {
                 // Add your code here - call a MyFs function and don't put the implementation here
 				throw std::runtime_error("not implemented");
 			} else if (cmd[0] == REMOVE_CMD) {
-                // Add your code here - call a MyFs function and don't put the implementation here
-				throw std::runtime_error("not implemented");
+                if (cmd.size() == 2) {
+                    fs.remove_file(cmd[1]);
+                } else {
+                    std::cout << "Invalid command format. Usage: rm <path>" << std::endl;
+                }
             } else {
 				std::cout << "unknown command: " << cmd[0] << std::endl;
 			}
