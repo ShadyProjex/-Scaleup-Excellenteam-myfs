@@ -63,6 +63,31 @@ public:
 	 */
     void remove_file(std::string path_str);
 
+    /**
+     * @brief Create a new directory at the specified path.
+     *
+     * @param dir_path The path where the new directory should be created.
+     * @throw std::runtime_error if the directory creation fails.
+     */
+    void create_directory(std::string dir_path);
+
+    /**
+     * @brief Remove the directory at the specified path.
+     *
+     * @param dir_path The path of the directory to be removed.
+     * @throw std::runtime_error if the directory removal fails.
+     */
+    void remove_directory(std::string dir_path);
+
+    /**
+     * @brief Move a file or directory from the old path to the new path.
+     *
+     * @param old_path The current path of the file or directory.
+     * @param new_path The new path where the file or directory should be moved.
+     * @throw std::runtime_error if the move operation fails.
+     */
+    void move_file(std::string old_path, std::string new_path);
+
 private:
 
 	/**
@@ -98,6 +123,93 @@ private:
     static const int BLOCK_SIZE = 4096;
     static const int MAX_FILES = 128;
     static const int MAX_BLOCKS = BlockDeviceSimulator::DEVICE_SIZE / BLOCK_SIZE;
+
+    //helper functions
+    /**
+    * Finds the index of the first free entry in the file table.
+    *
+    * @param file_table The array of FileEntry structures representing the file table.
+    * @return Index of the first free entry, or -1 if no free entry is found.
+    */
+    int find_free_file_entry(FileEntry file_table[]);
+
+    /**
+    * Finds the index of the file entry with the specified path in the file table.
+    *
+    * @param path_str The path of the file or directory to find.
+    * @param file_table The array of FileEntry structures representing the file table.
+    * @return Index of the file entry, or -1 if not found.
+    */
+    int find_file_entry(std::string path_str, FileEntry file_table[]);
+
+    /**
+    * Finds the index of the directory entry with the specified path in the file table.
+    *
+    * @param path_str The path of the directory to find.
+    * @param file_table The array of FileEntry structures representing the file table.
+    * @return Index of the directory entry, or -1 if not found or not a directory.
+    */
+    int find_directory_entry(std::string path_str, FileEntry file_table[]);
+
+    /**
+    * Reads the content of a file specified by its entry into a string.
+    *
+    * @param file_entry The FileEntry structure representing the file to read.
+    * @param content Output parameter where the content of the file will be stored.
+    */
+    void read_file_content(const FileEntry& file_entry, std::string& content,const int blocksize);
+
+    /**
+    * Allocates contiguous blocks on the block device for storing a new file or directory.
+    *
+    * @param num_blocks The number of free contiguous blocks needed.
+    * @return The starting block index of the allocated blocks.
+    * @throws std::runtime_error if there is not enough free space to allocate blocks.
+    */
+    int allocate_blocks(int num_blocks);
+
+    /**
+    * Allocates blocks and writes content to the blocks for a file.
+    *
+    * @param file_entry The FileEntry structure representing the file to write.
+    * @param content The content to write into the file.
+    * @param blocksize The block size.
+    * @return The starting block index of the allocated blocks.
+    */
+    int allocate_and_write_blocks(const FileEntry& file_entry, const std::string& content,const int blocksize);
+
+    /**
+    * Updates the size of a file entry after writing new content to the file.
+    *
+    * @param file_entry The FileEntry structure representing the file to update.
+    * @param content_size The size of the new content written to the file.
+    * @param path_str The path of the file to find.
+    * @param start_block The starting block index of the allocated blocks.
+    */
+    void update_file_entry(FileEntry& file_entry, int content_size,const std::string path_str,const int start_block);
+
+    /**
+    * Clears a file entry by resetting its fields to default values.
+    *
+    * @param file_entry The FileEntry structure representing the file entry to clear.
+    */
+    void clear_file_entry(FileEntry& file_entry);
+
+    /**
+    * Clears the free block bitmap on the block device by marking all blocks as free.
+    */
+    void clear_free_block_bitmap(SuperBlock superblock);
+
+    /**
+    * Clears all data blocks on the block device by writing empty blocks to each block.
+    */
+    void clear_data_blocks();
+
+    void clear_file_table();
+
+    void free_allocated_blocks(const FileEntry& file_entry);
+
+
 };
 
 #endif // __MYFS_H__
