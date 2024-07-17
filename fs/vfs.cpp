@@ -73,9 +73,7 @@ void run_vfs(MyFs &fs) {
                 }
             } else if (cmd[0] == CREATE_FILE_CMD) {
                 if (cmd.size() == 2) {
-                    fs.create_file(cmd[1], false); // Assuming creating a file, not a directory
-                } else if (cmd.size() == 3 && cmd[2] == "dir") {
-                    fs.create_file(cmd[1], true); // Creating a directory
+                    fs.create_file(cmd[1], false);
                 } else {
                     std::cout << "Invalid command format. Usage: touch <path> or touch <path> dir" << std::endl;
                 }
@@ -102,7 +100,6 @@ void run_vfs(MyFs &fs) {
                         }
                         new_content += line + "\n";
                     }
-
                     try {
                         fs.set_content(cmd[1], new_content);
                         std::cout << "Content updated successfully.\n";
@@ -121,8 +118,7 @@ void run_vfs(MyFs &fs) {
             } else if (cmd[0] == CREATE_DIR_CMD) {
                 if (cmd.size() == 2) {
                     try {
-                        fs.create_directory(cmd[1]);
-                        std::cout << "Directory created: " << cmd[1] << std::endl;
+                        fs.create_file(cmd[1], true);
                     } catch (const std::exception& e) {
                         std::cout << "Error creating directory: " << e.what() << std::endl;
                     }

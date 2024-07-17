@@ -64,14 +64,6 @@ public:
     void remove_file(std::string path_str);
 
     /**
-     * @brief Create a new directory at the specified path.
-     *
-     * @param dir_path The path where the new directory should be created.
-     * @throw std::runtime_error if the directory creation fails.
-     */
-    void create_directory(std::string dir_path);
-
-    /**
      * @brief Remove the directory at the specified path.
      *
      * @param dir_path The path of the directory to be removed.
@@ -87,7 +79,7 @@ public:
      * @throw std::runtime_error if the move operation fails.
      */
     void move_file(std::string old_path, std::string new_path);
-
+    void create_root_directory();
 private:
 
 	/**
@@ -103,11 +95,20 @@ private:
 		uint8_t version;
 	};
 
+    static const uint8_t CURR_VERSION = 0x03;
+    static const char *MYFS_MAGIC;
+    static const int BLOCK_SIZE = 4096;
+    static const int MAX_FILES = 128;
+    static const int MAX_BLOCKS = BlockDeviceSimulator::DEVICE_SIZE / BLOCK_SIZE;
+
     struct FileEntry {
         char name[32];
         uint32_t start_block;
         uint32_t size;
         bool is_directory;
+        int parent_index; // Index of the parent directory in the file table
+        int child_indices[MAX_FILES]; // Indices of children (files/directories)
+        int num_children; // Number of children
     };
 
     struct SuperBlock {
@@ -117,12 +118,6 @@ private:
     };
 
 	BlockDeviceSimulator *blkdevsim;
-
-	static const uint8_t CURR_VERSION = 0x03;
-	static const char *MYFS_MAGIC;
-    static const int BLOCK_SIZE = 4096;
-    static const int MAX_FILES = 128;
-    static const int MAX_BLOCKS = BlockDeviceSimulator::DEVICE_SIZE / BLOCK_SIZE;
 
     //helper functions
     /**
@@ -183,10 +178,9 @@ private:
     *
     * @param file_entry The FileEntry structure representing the file to update.
     * @param content_size The size of the new content written to the file.
-    * @param path_str The path of the file to find.
     * @param start_block The starting block index of the allocated blocks.
     */
-    void update_file_entry(FileEntry& file_entry, int content_size,const std::string path_str,const int start_block);
+    void update_file_entry(FileEntry& file_entry, int content_size,const int start_block);
 
     /**
     * Clears a file entry by resetting its fields to default values.

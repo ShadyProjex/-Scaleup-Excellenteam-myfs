@@ -18,6 +18,29 @@ MyFs::MyFs(BlockDeviceSimulator *blkdevsim_) : blkdevsim(blkdevsim_) {
         std::cout << "Finished!" << std::endl;
     }
 }
+void MyFs::create_root_directory() {
+    FileEntry root_entry;
+    strncpy(root_entry.name, "/", sizeof(root_entry.name));
+    root_entry.name[sizeof(root_entry.name) - 1] = '\0';
+    root_entry.is_directory = true;
+    root_entry.size = 0;
+    root_entry.start_block = 0; // Assuming root directory doesn't need blocks initially
+    root_entry.parent_index = -1; // Indicating it's the root directory
+    root_entry.num_children = 0;
+
+    FileEntry file_table[MAX_FILES];
+    blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
+
+    // Find a free entry in the file table
+    int free_index = find_free_file_entry(file_table);
+    if (free_index == -1) {
+        throw std::runtime_error("No space left for new files");
+    }
+
+    // Update file table with root directory entry
+    file_table[free_index] = root_entry;
+    blkdevsim->write(sizeof(SuperBlock), sizeof(file_table), (const char*)file_table);
+}
 
 void MyFs::format() {
     SuperBlock superblock;
@@ -26,23 +49,28 @@ void MyFs::format() {
     superblock.file_table_size = MAX_FILES * sizeof(FileEntry);
     superblock.free_block_bitmap_size = (MAX_BLOCKS + 7) / 8;
     blkdevsim->write(0, sizeof(superblock), (const char*)&superblock);
-    // Clear file table, free block bitmap, and all data blocks
     clear_file_table();
     clear_free_block_bitmap(superblock);
     clear_data_blocks();
+    create_root_directory();
     std::cout << "Formatted the file system." << std::endl;
 }
 
 void MyFs::create_file(std::string path_str, bool directory) {
-    if (path_str[0] != '/') {
-        path_str = "/" + path_str;
-    }
-
+    // Extract parent directory path
+    size_t last_slash = path_str.find_last_of('/');
+    std::string parent_path = last_slash == std::string::npos ? "/" : path_str.substr(0, last_slash);
+    std::string file_name = last_slash == std::string::npos ? path_str : path_str.substr(last_slash + 1);
     FileEntry file_table[MAX_FILES];
     blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
+    // Find the parent directory entry
+    int parent_index = find_file_entry(parent_path, file_table);
+    if (parent_index == -1 && !parent_path.empty()) {
+        throw std::runtime_error("Parent directory does not exist");
+    }
     // Check if the file already exists
     for (int i = 0; i < MAX_FILES; ++i) {
-        if (strcmp(file_table[i].name, path_str.c_str()) == 0) {
+        if (strcmp(file_table[i].name, file_name.c_str()) == 0 && file_table[i].parent_index == parent_index) {
             throw std::runtime_error("File or directory already exists");
         }
     }
@@ -54,85 +82,79 @@ void MyFs::create_file(std::string path_str, bool directory) {
 
     // Initialize the new file entry
     FileEntry new_file;
-    std::cout<<path_str<<std::endl;
-    strncpy(new_file.name, path_str.c_str(), sizeof(new_file.name));
+    strncpy(new_file.name, file_name.c_str(), sizeof(new_file.name));
     new_file.name[sizeof(new_file.name) - 1] = '\0';
     new_file.is_directory = directory;
     new_file.size = 0;
-
-    // Allocate blocks for the file
-    int start_block = allocate_blocks(1);
-    new_file.start_block = start_block;
-
+    new_file.parent_index = parent_index;
+    new_file.num_children = 0;
+    // Allocate blocks for the file if it's not a directory
+    if (!directory) {
+        int start_block = allocate_blocks(1);
+        new_file.start_block = start_block;
+    } else {
+        new_file.start_block = 0; // Directories don't need blocks initially
+    }
     // Update file table entry
     file_table[free_index] = new_file;
+    // Update parent directory's child list
+    if (parent_index != -1) {
+        file_table[parent_index].child_indices[file_table[parent_index].num_children] = free_index;
+        file_table[parent_index].num_children++;
+    }
     blkdevsim->write(sizeof(SuperBlock), sizeof(file_table), (const char*)file_table);
+
+    if (directory) {
+        // Append '/' to directory name
+        strncat(new_file.name, "/", sizeof(new_file.name) - strlen(new_file.name) - 1);
+    }
 
     std::cout << (directory ? "Directory" : "File") << " " << path_str << " created." << std::endl;
 }
 
 std::string MyFs::get_content(std::string path_str) {
-    if (path_str.empty() || path_str[0] != '/') {
-        throw std::runtime_error("Invalid path");
-    }
     FileEntry file_table[MAX_FILES];
     blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
-    // Find the file entry
     int file_index = find_file_entry(path_str, file_table);
     if (file_index == -1 || file_table[file_index].is_directory) {
         throw std::runtime_error("File not found or is a directory");
     }
-    // Read file content
     std::string content;
     read_file_content(file_table[file_index], content,BLOCK_SIZE);
     return content;
 }
 
 void MyFs::set_content(std::string path_str, std::string content) {
-    if (path_str.empty() || path_str[0] != '/') {
-        throw std::runtime_error("Invalid path");
-    }
     FileEntry file_table[MAX_FILES];
     blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
-    // Find the file entry
     int file_index = find_file_entry(path_str, file_table);
     if (file_index == -1 || file_table[file_index].is_directory) {
         throw std::runtime_error("File not found or is a directory");
     }
-    // Allocate blocks and write content
     int start_block=allocate_and_write_blocks(file_table[file_index], content,BLOCK_SIZE);
-    // Update file table entry
-    update_file_entry(file_table[file_index], content.size(),path_str,start_block);
-    // Write updated file table
+    update_file_entry(file_table[file_index], content.size(),start_block);
     blkdevsim->write(sizeof(SuperBlock), sizeof(file_table), (const char*)file_table);
 }
 
 void MyFs::list_dir(std::string path_str) {
-    if (path_str.empty() || path_str[0] != '/') {
-        throw std::runtime_error("Invalid path");
-    }
-
     FileEntry file_table[MAX_FILES];
     blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
 
     // Find the directory entry
-    int dir_index = find_directory_entry(path_str, file_table);
-    if (dir_index == -1) {
+    int dir_index = find_file_entry(path_str, file_table);
+    if (dir_index == -1 || !file_table[dir_index].is_directory) {
         throw std::runtime_error("Directory not found");
     }
 
-    for (int i = 0; i < MAX_FILES; ++i) {
-        if (file_table[i].name[0] != '\0' && file_table[i].is_directory && path_str == file_table[i].name) {
-            std::cout << file_table[i].name << (file_table[i].is_directory ? "/" : "") << std::endl;
-        }
+    // List directory contents
+    for (int i = 0; i < file_table[dir_index].num_children; ++i) {
+        int child_index = file_table[dir_index].child_indices[i];
+        std::cout << file_table[child_index].name <<(file_table[child_index].is_directory?"/":"") << " " << file_table[child_index].size << std::endl;
     }
-
 }
 
+
 void MyFs::remove_file(std::string path_str) {
-    if (path_str.empty() || path_str[0] != '/') {
-        throw std::runtime_error("Invalid path");
-    }
     FileEntry file_table[MAX_FILES];
     blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
     // Find the file entry
@@ -140,16 +162,9 @@ void MyFs::remove_file(std::string path_str) {
     if (file_index == -1) {
         throw std::runtime_error("File not found");
     }
-
-    // Free allocated blocks
     free_allocated_blocks(file_table[file_index]);
-
-    // Clear file table entry
     clear_file_entry(file_table[file_index]);
-
-    // Write updated file table
     blkdevsim->write(sizeof(SuperBlock), sizeof(file_table), (const char*)file_table);
-
     std::cout << "File " << path_str << " removed." << std::endl;
 }
 
@@ -184,10 +199,12 @@ int MyFs::find_directory_entry(std::string path_str, FileEntry file_table[]) {
 void MyFs::read_file_content(const FileEntry& file_entry, std::string& content,const int blocksize) {
     int current_block = file_entry.start_block;
     int remaining_size = file_entry.size;
+    std::cout<<" start "<<current_block<<" ,num blocks"<<remaining_size<<"\n";
     while (remaining_size > 0) {
         char block[blocksize];
         int read_size = std::min(blocksize, remaining_size);
         blkdevsim->read(current_block * blocksize, read_size, block);
+        std::cout<<" block  "<<block<<"\n";
         content.append(block, read_size);
         remaining_size -= read_size;
         current_block++;
@@ -197,6 +214,7 @@ void MyFs::read_file_content(const FileEntry& file_entry, std::string& content,c
 int MyFs::allocate_and_write_blocks(const FileEntry& file_entry, const std::string& content,const int blocksize) {
     int num_blocks = ceil((double)content.size() / blocksize);
     int start_block =allocate_blocks(num_blocks);
+    std::cout<<"ALLOCATE TEST content: "<<content<<" start "<<start_block<<" ,num blocks"<<num_blocks<<"\n";
     int current_block = start_block;
     int remaining_size = content.size();
     int offset = 0;
@@ -210,9 +228,8 @@ int MyFs::allocate_and_write_blocks(const FileEntry& file_entry, const std::stri
     return start_block;
 }
 
-void MyFs::update_file_entry(FileEntry& file_entry, int content_size,const std::string path_str,const int start_block) {
+void MyFs::update_file_entry(FileEntry& file_entry, int content_size,const int start_block) {
     file_entry.size = content_size;
-    strcpy(file_entry.name,path_str.c_str());
     file_entry.is_directory= false;
     file_entry.start_block=start_block;
 }
@@ -293,58 +310,14 @@ int MyFs::allocate_blocks(int num_blocks) {
 
 //bonus:
 
-void MyFs::create_directory(std::string dir_path) {
-    if (dir_path.empty() || dir_path[0] != '/') {
-        throw std::runtime_error("Invalid path");
-    }
-    // Read the file table
-    FileEntry file_table[MAX_FILES];
-    blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
-
-    // Check if directory already exists
-    int existing_index = find_directory_entry(dir_path, file_table);
-    if (existing_index != -1) {
-        throw std::runtime_error("Directory already exists");
-    }
-
-    // Find a free entry in the file table
-    int free_index = find_free_file_entry(file_table);
-    if (free_index == -1) {
-        throw std::runtime_error("No space left for new directories");
-    }
-
-    // Initialize the new directory entry
-    FileEntry new_dir;
-    strncpy(new_dir.name, dir_path.c_str(), sizeof(new_dir.name));
-    new_dir.name[sizeof(new_dir.name) - 1] = '\0';
-    new_dir.is_directory = true;
-    new_dir.size = 0;
-
-    // Find and allocate blocks for the directory (if needed)
-
-    // Update file table and write back
-    file_table[free_index] = new_dir;
-    blkdevsim->write(sizeof(SuperBlock), sizeof(file_table), (const char*)file_table);
-
-    std::cout << "Directory " << dir_path << " created." << std::endl;
-}
 
 void MyFs::remove_directory(std::string dir_path) {
-    if (dir_path.empty() || dir_path[0] != '/') {
-        throw std::runtime_error("Invalid path");
-    }
-    // Read the file table
     FileEntry file_table[MAX_FILES];
     blkdevsim->read(sizeof(SuperBlock), sizeof(file_table), (char*)file_table);
-
-    // Find the directory entry
     int dir_index = find_directory_entry(dir_path, file_table);
     if (dir_index == -1) {
         throw std::runtime_error("Directory not found");
     }
-
-    // Check if directory is empty (optional step depending on your requirements)
-
     // Clear the directory entry in the file table
     memset(&file_table[dir_index], 0, sizeof(FileEntry));
     blkdevsim->write(sizeof(SuperBlock), sizeof(file_table), (const char*)file_table);
